@@ -1,0 +1,31 @@
+# Ignore python virtual environments
+.venv/
+venv/
+env/
+
+# Ignore node modules (will be installed inside the container)
+node_modules/
+CrashSenseApp/server/node_modules/
+CrashSenseApp/client/node_modules/
+
+# Ignore frontend build assets (assuming you deploy frontend separately, or if not relevant to backend API)
+CrashSenseApp/client/dist/
+
+# Ignore local upload/generated files
+CrashSenseApp/server/uploads/
+CrashSenseApp/server/logs/
+
+# Ignore local environment variables (Render uses its own dashboard for this)
+.env
+CrashSenseApp/server/.env
+
+# General version control and OS files
+.git/
+.gitignore
+.DS_Store
+*.log
+npm-debug.log*
+
+# Ignore any IDE specific folders
+.vscode/
+.idea/
