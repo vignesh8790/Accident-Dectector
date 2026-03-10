@@ -136,7 +136,7 @@ exports.analyzeVideo = (req, res) => {
   }
 
   // Path to the main Engine inference script
-  const pythonScript = path.join(__dirname, '..', '..', '..', 'Engine', 'codes', 'test_inference.py');
+  const pythonScript = path.join(__dirname, '..', '..', '..', 'Engine', 'codes', 'test_inference_lite.py');
   
   // We need to run it in the Engine/codes directory so it finds models/yolo weights correctly
   const cwd = path.dirname(pythonScript);
