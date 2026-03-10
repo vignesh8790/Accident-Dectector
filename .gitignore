@@ -1,0 +1,71 @@
+# Virtual Environments
+.venv/
+venv/
+ENV/
+ai-service/venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*,cover
+.hypothesis/
+
+# Node / JS
+node_modules/
+client/node_modules/
+server/node_modules/
+dist/
+client/dist/
+build/
+.npm
+.eslintcache
+.stylelintcache
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment Variables
+.env
+*.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+server/.env
+client/.env
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Project Specific
+Engine/videos/
+Engine/Videos/
+Engine/Features/
+Engine/yolov8n.pt
+CrashSenseApp/server/uploads/*
+!CrashSenseApp/server/uploads/.gitkeep
+sample-videos/

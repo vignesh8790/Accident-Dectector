@@ -1,0 +1,49 @@
+import { createContext, useContext, useEffect, useState, useRef } from 'react';
+import { io } from 'socket.io-client';
+import { useAuth } from './AuthContext';
+
+const SocketContext = createContext(null);
+
+export function SocketProvider({ children }) {
+  const { user } = useAuth();
+  const [socket, setSocket] = useState(null);
+  const [detections, setDetections] = useState({});
+  const [alerts, setAlerts] = useState([]);
+  const [connected, setConnected] = useState(false);
+  const alertsRef = useRef([]);
+
+  useEffect(() => {
+    // Connect to the backend Node.js Server
+    const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+    const s = io(backendUrl.replace('/api', ''), { transports: ['websocket', 'polling'] });
+
+    s.on('connect', () => setConnected(true));
+    s.on('disconnect', () => setConnected(false));
+
+    s.on('detection', (data) => {
+      if (data.userId && user && data.userId === user._id) {
+        setDetections(prev => ({ ...prev, [data.cameraId]: data }));
+      }
+    });
+
+    s.on('alert', (data) => {
+      if (data.userId && user && data.userId === user._id) {
+        alertsRef.current = [data, ...alertsRef.current].slice(0, 50);
+        setAlerts([...alertsRef.current]);
+      }
+    });
+
+    setSocket(s);
+    return () => s.disconnect();
+  }, [user]);
+
+  const clearAlerts = () => { alertsRef.current = []; setAlerts([]); };
+
+  return (
+    <SocketContext.Provider value={{ socket, detections, alerts, connected, clearAlerts }}>
+      {children}
+    </SocketContext.Provider>
+  );
+}
+
+export const useSocket = () => useContext(SocketContext);
