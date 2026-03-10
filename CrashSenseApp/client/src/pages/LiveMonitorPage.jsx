@@ -6,9 +6,8 @@ import {
   MonitorPlay, MapPin, AlertTriangle, Volume2, VolumeX,
   Maximize2, Minimize2, Camera, Plus, X, Wifi, WifiOff,
   Shield, Clock, Activity, ChevronRight, Bell, RefreshCw,
-  Loader2, Trash2, Eye
 } from 'lucide-react';
-import api from '../services/api';
+import api, { getMediaUrl } from '../services/api';
 
 export default function LiveMonitorPage() {
   const { isDark } = useTheme();
@@ -191,7 +190,7 @@ export default function LiveMonitorPage() {
                         {/* Video Feed */}
                         <div className={`relative ${isExpanded ? 'aspect-[16/8]' : 'aspect-video'} bg-black overflow-hidden`}>
                           <video
-                            src={`/api/videos/stream/${cam.videoSource}`}
+                            src={getMediaUrl(`/api/videos/stream/${cam.videoSource}`)}
                             autoPlay muted loop playsInline
                             className="w-full h-full object-cover"
                           />

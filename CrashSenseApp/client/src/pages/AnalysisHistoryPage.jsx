@@ -6,7 +6,7 @@ import {
   AlertTriangle, Activity, Clock, FileText, ChevronRight, Play, 
   Info, Car, ChevronDown, ChevronUp, MapPin, Loader2, Search
 } from 'lucide-react';
-import api from '../services/api';
+import api, { getMediaUrl } from '../services/api';
 
 // ── Helper utilities (duplicated from VideoAnalysisPage for consistency) ──
 
@@ -117,7 +117,7 @@ export default function AnalysisHistoryPage() {
            <div className={`${cardClass} aspect-video bg-black overflow-hidden flex items-center justify-center`}>
               <video 
                 ref={videoRef}
-                src={res.annotatedVideoUrl || res.originalVideoPath} 
+                src={getMediaUrl(res.annotatedVideoUrl || res.originalVideoPath)} 
                 className="w-full h-full object-contain"
                 controls
               />

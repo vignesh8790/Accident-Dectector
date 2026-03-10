@@ -3,7 +3,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Upload, Video, Play, AlertTriangle, Clock, Loader2, CheckCircle2, ShieldAlert, Car, Activity, FileText, MapPin, Eye, Info, ChevronDown, ChevronUp } from 'lucide-react';
-import api from '../services/api';
+import api, { getMediaUrl } from '../services/api';
 import { useSocket } from '../context/SocketContext';
 
 // ── Helper utilities for the detailed report ──
@@ -116,7 +116,7 @@ export default function VideoAnalysisPage() {
       });
 
       if (uploadRes.data.path) {
-        setVideoUrl(`${uploadRes.data.path}?t=${Date.now()}`);
+        setVideoUrl(getMediaUrl(`${uploadRes.data.path}?t=${Date.now()}`));
       }
 
       setUploading(false);
@@ -134,7 +134,7 @@ export default function VideoAnalysisPage() {
       const annotatedUrl = analyzeRes.data.annotatedVideoUrl;
       
       if (annotatedUrl) {
-          setVideoUrl(`${annotatedUrl}?t=${Date.now()}`);
+          setVideoUrl(getMediaUrl(`${annotatedUrl}?t=${Date.now()}`));
       }
       
       if (videoRef.current) {

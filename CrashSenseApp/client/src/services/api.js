@@ -1,7 +1,13 @@
 import axios from 'axios';
 
-const backendUrl = import.meta.env.VITE_API_URL || '';
+export const backendUrl = import.meta.env.VITE_API_URL || '';
 const api = axios.create({ baseURL: backendUrl ? `${backendUrl}/api` : '/api' });
+
+export const getMediaUrl = (path) => {
+  if (!path) return '';
+  if (path.startsWith('http')) return path;
+  return `${backendUrl}${path.startsWith('/') ? '' : '/'}${path}`;
+};
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('crashsense_token');

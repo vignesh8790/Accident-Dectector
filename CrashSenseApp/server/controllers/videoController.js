@@ -98,6 +98,13 @@ exports.uploadVideo = async (req, res) => {
     console.log(`[Transcode] Starting for ${safeName}...`);
     const pythonProcess = spawn('python', [pythonScript, inputPath, outputPath], { cwd });
 
+    pythonProcess.on('error', (err) => {
+      console.error(`[Transcode] Spawn error for ${safeName}:`, err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to start video processing engine.' });
+      }
+    });
+
     pythonProcess.on('close', (code) => {
       if (code === 0) {
         console.log(`[Transcode] Finished successfully for ${safeName}`);
@@ -151,6 +158,13 @@ exports.analyzeVideo = (req, res) => {
   const outFilePath = path.join(UPLOADS_DIR, outFileName);
 
   const pythonProcess = spawn(pythonPath, [pythonScript, '--video', filePath, '--output', outFilePath], { cwd });
+
+  pythonProcess.on('error', (err) => {
+    console.error(`[AI Error] Spawn error:`, err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'AI processing engine is not available or failed to start.' });
+    }
+  });
 
   const markers = [];
   let stdoutBuffer = '';

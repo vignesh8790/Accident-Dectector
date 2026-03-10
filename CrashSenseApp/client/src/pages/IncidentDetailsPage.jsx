@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { motion } from 'framer-motion';
 import { ArrowLeft, CheckCircle2, XCircle, Download, AlertTriangle, Clock, Camera, Shield, Car } from 'lucide-react';
-import api from '../services/api';
+import api, { getMediaUrl } from '../services/api';
 import { exportIncidentPDF } from '../utils/pdfExport';
 
 export default function IncidentDetailsPage() {
@@ -66,7 +66,7 @@ export default function IncidentDetailsPage() {
           <h2 className="font-bold mb-4 flex items-center gap-2"><Camera className="w-4 h-4 text-primary" /> Incident Clip</h2>
           <div className="rounded-xl overflow-hidden bg-black aspect-video">
             {incident.videoClipPath ? (
-              <video src={`/api/videos/stream/${incident.videoClipPath}`} controls autoPlay className="w-full h-full object-cover" />
+              <video src={getMediaUrl(`/api/videos/stream/${incident.videoClipPath}`)} controls autoPlay className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-dark-muted">No video clip available</div>
             )}
