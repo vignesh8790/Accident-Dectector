@@ -6,6 +6,7 @@ import {
   MonitorPlay, MapPin, AlertTriangle, Volume2, VolumeX,
   Maximize2, Minimize2, Camera, Plus, X, Wifi, WifiOff,
   Shield, Clock, Activity, ChevronRight, Bell, RefreshCw,
+  Loader2, Trash2, Eye
 } from 'lucide-react';
 import api, { getMediaUrl } from '../services/api';
 

@@ -79,6 +79,7 @@ export default function VideoAnalysisPage() {
   const [liveFrame, setLiveFrame] = useState(null);
   const [expandedIncident, setExpandedIncident] = useState(null);
   const videoRef = useRef(null);
+  const [error, setError] = useState(null);
   
   useEffect(() => {
     if (!socket) return;
@@ -106,6 +107,7 @@ export default function VideoAnalysisPage() {
     if (!file) return;
     setUploading(true);
     setProgress(0);
+    setError(null);
 
     try {
       const formData = new FormData();
@@ -155,7 +157,9 @@ export default function VideoAnalysisPage() {
       // Auto-expand first incident
       if (realMarkers.length > 0) setExpandedIncident(0);
     } catch (err) {
-      console.error(err);
+      console.error("AI Analysis Error:", err);
+      const errMsg = err.response?.data?.error || err.response?.data?.details || err.message || 'Analysis failed. Please try again.';
+      setError(errMsg);
     } finally {
       setUploading(false);
       setProcessing(false);
@@ -173,10 +177,10 @@ export default function VideoAnalysisPage() {
   const cardClass = `rounded-2xl p-6 border ${isDark ? 'bg-dark-card border-dark-border' : 'bg-white border-light-border shadow-sm'}`;
 
   // Compute overall summary from result
-  const overallSeverity = result?.markers?.length > 0 
+  const isAccident = !!(result && result.markers && result.markers.length > 0);
+  const overallSeverity = isAccident 
     ? getSeverity(Math.max(...result.markers.map(m => m.confidence))) 
     : null;
-  const isAccident = result?.markers?.length > 0;
 
   return (
     <div className="space-y-6">
@@ -234,6 +238,20 @@ export default function VideoAnalysisPage() {
             </motion.div>
           )}
         </div>
+
+        {/* Error display */}
+        {error && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`rounded-2xl p-5 border ${isDark ? 'bg-red-500/10 border-red-500/30' : 'bg-red-50 border-red-200'}`}>
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="w-5 h-5 text-red-500" />
+              <span className="font-bold text-red-500">Analysis Failed</span>
+            </div>
+            <p className={`text-sm ${isDark ? 'text-red-300' : 'text-red-700'}`}>{error}</p>
+            <button onClick={() => { setError(null); setFile(null); setResult(null); setVideoUrl(null); }}
+              className="mt-3 px-4 py-2 rounded-lg bg-red-500/20 text-red-500 text-sm font-semibold hover:bg-red-500/30 transition-colors"
+            >Try Again</button>
+          </motion.div>
+        )}
 
         {/* Preview & Results */}
         <div className="space-y-4">

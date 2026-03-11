@@ -84,12 +84,6 @@ export default function LoginPage() {
               {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Authenticating...</> : 'Sign In'}
             </button>
           </form>
-
-          <div className="mt-6 p-4 rounded-xl bg-dark-card border border-dark-border">
-            <p className="text-xs text-dark-muted mb-2 uppercase tracking-widest">Demo Credentials</p>
-            <p className="text-xs font-mono text-dark-muted">Admin: admin@crashsense.com / admin123</p>
-            <p className="text-xs font-mono text-dark-muted">Operator: operator@crashsense.com / operator123</p>
-          </div>
         </div>
       </motion.div>
     </div>

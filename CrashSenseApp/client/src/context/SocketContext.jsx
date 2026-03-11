@@ -14,8 +14,8 @@ export function SocketProvider({ children }) {
 
   useEffect(() => {
     // Connect to the backend Node.js Server
-    const backendUrl = import.meta.env.VITE_API_URL || '';
-    const s = io(backendUrl ? backendUrl.replace('/api', '') : undefined, { transports: ['websocket', 'polling'] });
+    const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+    const s = io(backendUrl.replace('/api', ''));
 
     s.on('connect', () => setConnected(true));
     s.on('disconnect', () => setConnected(false));

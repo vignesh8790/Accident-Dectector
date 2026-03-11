@@ -6,12 +6,13 @@ FROM node:18-bullseye-slim
 WORKDIR /app
 
 # Install Python 3, pip, and required system libraries for OpenCV
-# We need libgl1 and libglib2.0-0 for OpenCV to work properly in a container
+# We need libgl1, libglib2.0-0, and ffmpeg for OpenCV to work properly in a container
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     libgl1 \
     libglib2.0-0 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a symlink so `python` maps to `python3`
@@ -39,8 +40,9 @@ COPY . /app/
 # Navigate to the Node.js server directory for the final startup command
 WORKDIR /app/CrashSenseApp/server
 
-# Ensure the uploads directory exists with correct permissions
+# Ensure the uploads and sample-videos directories exist with correct permissions
 RUN mkdir -p uploads && chmod 777 uploads
+RUN mkdir -p ../sample-videos && chmod 777 ../sample-videos
 
 # Expose the API port
 EXPOSE 5000

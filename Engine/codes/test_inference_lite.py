@@ -5,37 +5,54 @@ import numpy as np
 from collections import deque
 import argparse
 import sys
+import base64
 
 # Lightweight Inference Engines
 import onnxruntime as ort
 from ultralytics import YOLO
 from deep_sort_realtime.deepsort_tracker import DeepSort
 
-def run_inference(video_source, lstm_onnx_path='../models/accident_detection_lstm_model.onnx', yolo_weights='yolov8n.pt', output=None):
+# Get absolute path of current script directory
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+def run_inference(video_source, lstm_onnx_path=None, yolo_weights=None, output=None):
+    if lstm_onnx_path is None:
+        lstm_onnx_path = os.path.join(script_dir, '..', 'models', 'accident_detection_lstm_model.onnx')
+    if yolo_weights is None:
+        yolo_weights = os.path.join(script_dir, 'yolov8n.pt')
+        
+    # Standardize paths
+    lstm_onnx_path = os.path.abspath(lstm_onnx_path)
+    yolo_weights = os.path.abspath(yolo_weights)
+    
+    print(f"[DEBUG] Working Directory: {os.getcwd()}", flush=True)
+    print(f"[DEBUG] LSTM Model Path: {lstm_onnx_path}", flush=True)
+    print(f"[DEBUG] YOLO Weights Path: {yolo_weights}", flush=True)
+    
     if not os.path.exists(lstm_onnx_path):
-        print(f"Error: ONNX model not found at {lstm_onnx_path}. Use convert_lstm.py first.")
+        print(f"Error: ONNX model not found at {lstm_onnx_path}. Use convert_lstm.py first.", flush=True)
         sys.exit(1)
         
-    print(f"[INFO] Loading YOLO weights from {yolo_weights}...")
+    print(f"[INFO] Loading YOLO weights from {yolo_weights}...", flush=True)
     detector = YOLO(yolo_weights)
     
-    print("[INFO] Initializing Deep SORT Tracker...")
+    print("[INFO] Initializing Deep SORT Tracker...", flush=True)
     tracker = DeepSort(max_age=30, nn_budget=100)
     
-    print(f"[INFO] Loading ONNX LSTM model from {lstm_onnx_path}...")
+    print(f"[INFO] Loading ONNX LSTM model from {lstm_onnx_path}...", flush=True)
     # Initialize ONNX runtime session (CPU only)
     ort_session = ort.InferenceSession(lstm_onnx_path, providers=['CPUExecutionProvider'])
     input_meta = ort_session.get_inputs()[0]
     input_name = input_meta.name
     
-    # Dynamically detect sequence length (e.g., 30 or 50)
-    seq_length = 50 
-    print(f"[INFO] Using fixed sequence length: {seq_length}")
+    # ONNX model input shape is [batch, 50, 114] — confirmed by inspecting the model
+    seq_length = 50
+    print(f"[INFO] Using sequence length: {seq_length}", flush=True)
     
     vehicle_classes = [2, 3, 5, 7]
     cap = cv2.VideoCapture(video_source)
     if not cap.isOpened():
-        print(f"Error: Could not open {video_source}")
+        print(f"Error: Could not open {video_source}", flush=True)
         sys.exit(1)
         
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -44,28 +61,29 @@ def run_inference(video_source, lstm_onnx_path='../models/accident_detection_lst
         
     out_writer = None
     if output:
-        # Try avc1 first
+        # Try avc1 first (H.264) for browser compatibility (works natively on Windows)
         fourcc = cv2.VideoWriter_fourcc(*'avc1')
         out_writer = cv2.VideoWriter(output, fourcc, fps, (w, h))
         
         if not out_writer.isOpened():
-            print(f"[INFO] avc1 failed, trying mp4v...")
+            print(f"[INFO] avc1 failed, trying mp4v...", flush=True)
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             out_writer = cv2.VideoWriter(output, fourcc, fps, (w, h))
             
         if not out_writer.isOpened():
-            print(f"[ERROR] Could not open VideoWriter for {output}")
+            print(f"[ERROR] Could not open VideoWriter for {output}", flush=True)
         else:
-            print(f"[INFO] VideoWriter opened successfully for {output}")
+            print(f"[INFO] VideoWriter opened successfully for {output}", flush=True)
     
     recent_features = deque(maxlen=seq_length)
     FRAME_DIM = 114
     last_marker_time = -10.0
+    frame_count = 0
     
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret: break
-            
+        
         current_time_sec = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
         vis_frame = frame.copy()
         
@@ -173,10 +191,12 @@ def run_inference(video_source, lstm_onnx_path='../models/accident_detection_lst
         cv2.putText(vis_frame, vehicle_count_text, (20, vis_frame.shape[0] - 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
 
-        # Base64 for live preview (Throttled to every 2nd frame)
-        if int(cap.get(cv2.CAP_PROP_POS_FRAMES)) % 2 == 0:
-            _, buffer = cv2.imencode('.jpg', vis_frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
-            print(f"FRAME:{base64.b64encode(buffer).decode('utf-8')}")
+        # Base64 for live preview (Throttled to every 5th processed frame to reduce bandwidth)
+        if frame_count % 15 == 0:
+            small = cv2.resize(vis_frame, (320, int(320 * vis_frame.shape[0] / vis_frame.shape[1])))
+            _, buffer = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 40])
+            print(f"FRAME:{base64.b64encode(buffer).decode('utf-8')}", flush=True)
+            sys.stdout.flush()
         
         if out_writer:
             out_writer.write(vis_frame)
@@ -190,5 +210,4 @@ if __name__ == "__main__":
     parser.add_argument('--output', type=str)
     args = parser.parse_args()
     
-    import base64
     run_inference(args.video, output=args.output)

@@ -1,6 +1,7 @@
+// Load .env.example as defaults, then override with .env (local dev) or environment vars (Render)
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env.example') });
-// Override with local .env if exists
-require('dotenv').config({ override: true });
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), override: true });
+require('dotenv').config({ override: true }); // Also check server/.env if exists
 
 const express = require('express');
 const http = require('http');

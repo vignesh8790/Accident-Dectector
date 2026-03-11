@@ -19,13 +19,24 @@ def transcode_video(input_path, output_path):
     if fps == 0 or fps != fps:
         fps = 30.0
 
-    # Initialize VideoWriter with H.264 (avc1)
-    # Note: On some Windows builds, 'avc1' might require OpenH264 DLL.
-    # We'll try 'H264' or 'mp4v' as fallback but 'avc1' is best for web.
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    # Try codecs in order of browser compatibility
+    # avc1 (H.264) is best for web but needs OpenH264 on some systems
+    # mp4v is universally available in OpenCV
+    out = None
+    for codec in ['avc1', 'mp4v']:
+        fourcc = cv2.VideoWriter_fourcc(*codec)
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        if out.isOpened():
+            print(f"Using codec: {codec}", flush=True)
+            break
+        out.release()
+        out = None
 
-    print(f"Transcoding {input_path} to {output_path}...")
+    if out is None:
+        print("Error: Could not initialize any video codec.", flush=True)
+        sys.exit(1)
+
+    print(f"Transcoding {input_path} to {output_path}...", flush=True)
     
     frame_count = 0
     while True:
@@ -35,12 +46,12 @@ def transcode_video(input_path, output_path):
         
         out.write(frame)
         frame_count += 1
-        if frame_count % 30 == 0:
-            print(f"Processed {frame_count} frames...")
+        if frame_count % 100 == 0:
+            print(f"Processed {frame_count} frames...", flush=True)
 
     cap.release()
     out.release()
-    print("Transcoding complete successfully.")
+    print("Transcoding complete successfully.", flush=True)
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:

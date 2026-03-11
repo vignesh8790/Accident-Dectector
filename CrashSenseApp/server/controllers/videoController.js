@@ -6,6 +6,8 @@ const Analysis = require('../models/Analysis');
 const SAMPLE_VIDEOS_DIR = path.join(__dirname, '..', '..', 'sample-videos');
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 
+const activeProcesses = new Map();
+
 // Ensure uploads directory exists
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
@@ -95,8 +97,16 @@ exports.uploadVideo = async (req, res) => {
     const pythonScript = path.join(__dirname, '..', '..', '..', 'Engine', 'codes', 'preprocess.py');
     const cwd = path.dirname(pythonScript);
 
-    console.log(`[Transcode] Starting for ${safeName}...`);
-    const pythonProcess = spawn('python', [pythonScript, inputPath, outputPath], { cwd });
+    // We're using python3 for Render/Linux, or just python for local/Windows
+    // On Windows, we try to use the project's .venv python if it exists
+    let pythonPath = process.platform === 'win32' ? 'python' : 'python3'; 
+    if (process.platform === 'win32') {
+      const venvPath = path.join(__dirname, '..', '..', '..', '.venv', 'Scripts', 'python.exe');
+      if (fs.existsSync(venvPath)) pythonPath = venvPath;
+    }
+
+    console.log(`[Transcode] Starting for ${safeName} using ${pythonPath}...`);
+    const pythonProcess = spawn(pythonPath, [pythonScript, inputPath, outputPath], { cwd });
 
     pythonProcess.on('error', (err) => {
       console.error(`[Transcode] Spawn error for ${safeName}:`, err);
@@ -135,6 +145,19 @@ exports.analyzeVideo = (req, res) => {
   const { filename } = req.body;
   if (!filename) return res.status(400).json({ error: 'Filename is required for analysis.' });
 
+  const userId = req.user ? req.user._id.toString() : 'anonymous';
+
+  if (activeProcesses.has(userId)) {
+    const oldProcess = activeProcesses.get(userId);
+    try {
+      console.log(`[AI Analysis] Killing previous process for user ${userId}`);
+      oldProcess.kill('SIGKILL');
+    } catch (e) {
+      console.error('[AI Analysis] Error killing active process:', e);
+    }
+    activeProcesses.delete(userId);
+  }
+
   const safeName = path.basename(filename);
   const filePath = path.join(UPLOADS_DIR, safeName);
 
@@ -150,14 +173,33 @@ exports.analyzeVideo = (req, res) => {
   
   const { spawn } = require('child_process');
   
-  // We're using the virtual env python if it exists, otherwise just global python
-  const pythonPath = 'python'; 
+  // We're using python3 for Render/Linux, or just python for local/Windows
+  // On Windows, we try to use the project's .venv python if it exists
+  let pythonPath = process.platform === 'win32' ? 'python' : 'python3'; 
+  
+  if (process.platform === 'win32') {
+    const venvPath = path.join(__dirname, '..', '..', '..', '.venv', 'Scripts', 'python.exe');
+    if (fs.existsSync(venvPath)) {
+      pythonPath = venvPath;
+      console.log(`[AI Analysis] Using Virtual Environment Python: ${pythonPath}`);
+    }
+  }
   
   // Create an output path for the annotated video
   const outFileName = `annotated-${safeName}`;
   const outFilePath = path.join(UPLOADS_DIR, outFileName);
 
+  console.log(`[AI Analysis] Spawning ${pythonPath} ${pythonScript} --video ${filePath} --output ${outFilePath}`);
   const pythonProcess = spawn(pythonPath, [pythonScript, '--video', filePath, '--output', outFilePath], { cwd });
+  
+  activeProcesses.set(userId, pythonProcess);
+
+  // Kill the process after 5 minutes to prevent Render from killing the whole server
+  const ANALYSIS_TIMEOUT = 5 * 60 * 1000;
+  const timeout = setTimeout(() => {
+    console.error(`[AI Analysis] Timeout after ${ANALYSIS_TIMEOUT / 1000}s, killing process`);
+    pythonProcess.kill('SIGKILL');
+  }, ANALYSIS_TIMEOUT);
 
   pythonProcess.on('error', (err) => {
     console.error(`[AI Error] Spawn error:`, err);
@@ -177,8 +219,10 @@ exports.analyzeVideo = (req, res) => {
     for (const line of lines) {
       if (line.startsWith('FRAME:')) {
         const b64 = line.substring(6).trim();
-        // Emit live frame to any connected Socket.IO clients listening to 'video_frame'
-        req.app.get('io').emit('video_frame', `data:image/jpeg;base64,${b64}`);
+        // Only emit if the base64 data is reasonable size (< 500KB)
+        if (b64.length < 500000) {
+          req.app.get('io').emit('video_frame', `data:image/jpeg;base64,${b64}`);
+        }
       } else if (line.includes('MARKER:')) {
         const parts = line.split('MARKER:')[1].trim().split(':');
         if (parts.length >= 2) {
@@ -194,39 +238,103 @@ exports.analyzeVideo = (req, res) => {
     }
   });
 
+  let stderrBuffer = '';
   pythonProcess.stderr.on('data', (data) => {
-    console.error(`[AI Error] ${data.toString().trim()}`);
+    const errorMsg = data.toString().trim();
+    stderrBuffer += errorMsg;
+    console.error(`[AI Error] ${errorMsg}`);
   });
 
   pythonProcess.on('close', async (code) => {
+    clearTimeout(timeout);
+    if (activeProcesses.get(userId) === pythonProcess) {
+      activeProcesses.delete(userId);
+    }
     console.log(`[AI Analysis] Finished with code ${code}`);
     
-    const analysisData = {
-      userId: req.user._id,
-      fileName: safeName,
-      fileSize: fs.statSync(filePath).size,
-      duration: 0, // In real app, we would get this from probe or cap
-      markers: markers,
-      originalVideoPath: `/api/videos/stream/${safeName}`,
-      annotatedVideoUrl: `/api/videos/stream/${outFileName}`,
-      processedAt: new Date()
+    if (code !== 0 && code !== null) {
+      console.error(`[AI Analysis] Failed with stderr: ${stderrBuffer}`);
+      if (!res.headersSent) {
+          return res.status(500).json({ 
+            error: 'AI processing engine failed to complete the analysis.',
+            details: stderrBuffer 
+          });
+      }
+      return;
+    }
+
+    // Re-encode annotated video with ffmpeg for browser compatibility (mp4v -> H.264)
+    let finalVideoName = outFileName;
+    const browserReadyName = `web-${outFileName}`;
+    const browserReadyPath = path.join(UPLOADS_DIR, browserReadyName);
+
+    const sendResponse = async () => {
+      const analysisData = {
+        userId: req.user._id,
+        fileName: safeName,
+        fileSize: fs.statSync(filePath).size,
+        duration: 0,
+        markers: markers,
+        originalVideoPath: `/api/videos/stream/${safeName}`,
+        annotatedVideoUrl: `/api/videos/stream/${finalVideoName}`,
+        processedAt: new Date()
+      };
+
+      try {
+        const savedAnalysis = await Analysis.create(analysisData);
+        res.json({
+          success: true,
+          markers: markers,
+          annotatedVideoUrl: `/api/videos/stream/${finalVideoName}`,
+          analysisId: savedAnalysis._id
+        });
+      } catch (saveError) {
+        console.error('Failed to save analysis results:', saveError);
+        res.json({
+          success: true,
+          markers: markers,
+          annotatedVideoUrl: `/api/videos/stream/${finalVideoName}`
+        });
+      }
     };
 
-    try {
-      const savedAnalysis = await Analysis.create(analysisData);
-      res.json({
-        success: true,
-        markers: markers,
-        annotatedVideoUrl: `/api/videos/stream/${outFileName}`,
-        analysisId: savedAnalysis._id
+    // Try to re-encode with ffmpeg for browser compatibility
+    if (fs.existsSync(outFilePath)) {
+      let responseSentFlag = false;
+      const ffmpegProcess = spawn('ffmpeg', [
+        '-y', '-i', outFilePath,
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+        '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+        '-an', browserReadyPath
+      ]);
+
+      ffmpegProcess.on('error', (err) => {
+        if (!responseSentFlag) {
+          responseSentFlag = true;
+          console.log(`[ffmpeg] Not available (${err.message}), using OpenCV output as fallback`);
+          finalVideoName = outFileName;
+          sendResponse();
+        }
       });
-    } catch (saveError) {
-      console.error('Failed to save analysis results:', saveError);
-      res.json({
-        success: true,
-        markers: markers,
-        annotatedVideoUrl: `/api/videos/stream/${outFileName}`
+
+      ffmpegProcess.on('close', (ffmpegCode) => {
+        if (!responseSentFlag) {
+          responseSentFlag = true;
+          if (ffmpegCode === 0 && fs.existsSync(browserReadyPath)) {
+            console.log(`[ffmpeg] Successfully re-encoded to ${browserReadyName}`);
+            finalVideoName = browserReadyName;
+          } else {
+            console.log(`[ffmpeg] Failed (code ${ffmpegCode}), using OpenCV output as fallback`);
+            finalVideoName = outFileName;
+          }
+          sendResponse();
+        }
       });
+    } else {
+      // Annotated file doesn't exist, use original upload
+      console.log(`[AI Analysis] No annotated file found, using original upload`);
+      finalVideoName = safeName;
+      sendResponse();
     }
   });
 };
