@@ -1,5 +1,9 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+# --- CRITICAL: PyTorch Memory Limits for Render 512MB RAM ---
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+# -----------------------------------------------------------
 import cv2
 import numpy as np
 from collections import deque
@@ -7,6 +11,10 @@ import argparse
 import sys
 import base64
 import gc
+
+import torch
+torch.set_num_threads(1)
+torch.set_grad_enabled(False)
 
 # Lightweight Inference Engines
 import onnxruntime as ort
@@ -21,7 +29,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 # frame features to detect accident patterns accurately.
 MAX_FRAME_WIDTH = 640    # Resize input frames to this max width to save RAM
 YOLO_IMGSZ = 320         # Smallest YOLO input size to minimize RAM
-DEEPSORT_BUDGET = 50     # Balanced between accuracy and RAM
+DEEPSORT_BUDGET = 30     # Balanced between accuracy and RAM
 LIVE_PREVIEW_EVERY = 20  # Send base64 preview every N frames
 
 def run_inference(video_source, lstm_onnx_path=None, yolo_weights=None, output=None):

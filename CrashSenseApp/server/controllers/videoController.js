@@ -94,46 +94,41 @@ exports.uploadVideo = async (req, res) => {
     // We transcode to an MP4 with H.264 (avc1) for maximum browser compatibility
     const previewFilename = `preview-${path.parse(safeName).name}.mp4`;
     const outputPath = path.join(UPLOADS_DIR, previewFilename);
-    const pythonScript = path.join(__dirname, '..', '..', '..', 'Engine', 'codes', 'preprocess.py');
-    const cwd = path.dirname(pythonScript);
+    console.log(`[Transcode] Starting FFmpeg for ${safeName}...`);
+    
+    // Use fluent-ffmpeg with the bundled static ffmpeg binary to guarantee it works on Render native
+    const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+    const ffmpeg = require('fluent-ffmpeg');
+    ffmpeg.setFfmpegPath(ffmpegPath);
 
-    // We're using python3 for Render/Linux, or just python for local/Windows
-    // On Windows, we try to use the project's .venv python if it exists
-    let pythonPath = process.platform === 'win32' ? 'python' : 'python3'; 
-    if (process.platform === 'win32') {
-      const venvPath = path.join(__dirname, '..', '..', '..', '.venv', 'Scripts', 'python.exe');
-      if (fs.existsSync(venvPath)) pythonPath = venvPath;
-    }
-
-    console.log(`[Transcode] Starting for ${safeName} using ${pythonPath}...`);
-    const pythonProcess = spawn(pythonPath, [pythonScript, inputPath, outputPath], { cwd });
-
-    pythonProcess.on('error', (err) => {
-      console.error(`[Transcode] Spawn error for ${safeName}:`, err);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Failed to start video processing engine.' });
-      }
-    });
-
-    pythonProcess.on('close', (code) => {
-      if (code === 0) {
-        console.log(`[Transcode] Finished successfully for ${safeName}`);
+    ffmpeg(inputPath)
+      .outputOptions([
+        '-c:v libx264',
+        '-preset veryfast',
+        '-crf 28',
+        '-c:a aac'
+      ])
+      .save(outputPath)
+      .on('end', () => {
+        console.log(`[Transcode] FFmpeg finished successfully for ${safeName}`);
         res.json({
           message: 'Video uploaded and prepared successfully.',
           filename: req.file.filename,
           previewFilename: previewFilename,
           path: `/api/videos/stream/${previewFilename}`
         });
-      } else {
-        console.error(`[Transcode] Failed for ${safeName} with code ${code}`);
-        // Fallback to original if transcoding fails (even if it might not play)
-        res.json({
-          message: 'Video uploaded (preparation failed).',
-          filename: req.file.filename,
-          path: `/api/videos/stream/${req.file.filename}`
-        });
-      }
-    });
+      })
+      .on('error', (err) => {
+        console.error(`[Transcode] FFmpeg error for ${safeName}:`, err);
+        if (!res.headersSent) {
+          // Fallback to original if transcoding fails (even if it might not play inline on all devices)
+          res.json({
+            message: 'Video uploaded (transcoding native failed).',
+            filename: req.file.filename,
+            path: `/api/videos/stream/${req.file.filename}`
+          });
+        }
+      });
 
   } catch (error) {
     console.error('Upload/Transcode error:', error);
