@@ -130,34 +130,77 @@ export default function VideoAnalysisPage() {
       }
 
       const filename = uploadRes.data.filename;
-      const analyzeRes = await api.post('/videos/analyze', { filename }, {
-        timeout: 180000 // 3 minute timeout for AI analysis (Render Free Tier is slow)
-      });
       
-      const realMarkers = analyzeRes.data.markers || [];
-      const annotatedUrl = analyzeRes.data.annotatedVideoUrl;
-      
-      if (annotatedUrl) {
-          setVideoUrl(getMediaUrl(`${annotatedUrl}?t=${Date.now()}`));
-      }
-      
-      if (videoRef.current) {
-        setTimeout(() => videoRef.current?.play().catch(e => console.warn(e)), 100);
-      }
-      
-      const dur = videoRef.current?.duration || 60;
-
-      setResult({ 
-        markers: realMarkers, 
-        totalFrames: dur * 30, 
-        processedAt: new Date().toISOString(),
-        fileName: file.name,
-        fileSize: file.size,
-        duration: dur
+      const token = localStorage.getItem('crashsense_token');
+      const response = await fetch(`${api.defaults.baseURL}/videos/analyze`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ filename })
       });
 
-      // Auto-expand first incident
-      if (realMarkers.length > 0) setExpandedIncident(0);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let done = false;
+      let buffer = '';
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop(); // Keep incomplete chunk
+
+          for (const part of parts) {
+            if (part.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(part.substring(6));
+                
+                if (data.error) {
+                  throw new Error(data.error);
+                }
+                
+                if (data.success) {
+                  const realMarkers = data.markers || [];
+                  const annotatedUrl = data.annotatedVideoUrl;
+                  
+                  if (annotatedUrl) {
+                      setVideoUrl(getMediaUrl(`${annotatedUrl}?t=${Date.now()}`));
+                  }
+                  
+                  if (videoRef.current) {
+                    setTimeout(() => videoRef.current?.play().catch(e => console.warn(e)), 100);
+                  }
+                  
+                  const dur = videoRef.current?.duration || 60;
+            
+                  setResult({ 
+                    markers: realMarkers, 
+                    totalFrames: dur * 30, 
+                    processedAt: new Date().toISOString(),
+                    fileName: file.name,
+                    fileSize: file.size,
+                    duration: dur
+                  });
+            
+                  // Auto-expand first incident
+                  if (realMarkers.length > 0) setExpandedIncident(0);
+                  done = true; // Exit loop
+                }
+              } catch (e) {
+                console.error("Error parsing SSE data:", e, part);
+              }
+            }
+          }
+        }
+      }
     } catch (err) {
       console.error("AI Analysis Error:", err);
       const errMsg = err.response?.data?.error || err.response?.data?.details || err.message || 'Analysis failed. Please try again.';

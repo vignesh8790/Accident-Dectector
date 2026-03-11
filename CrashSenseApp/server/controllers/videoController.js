@@ -189,21 +189,35 @@ exports.analyzeVideo = (req, res) => {
   
   activeProcesses.set(userId, pythonProcess);
 
-  // Kill the process after 2 minutes to prevent Render OOM kills
-  const ANALYSIS_TIMEOUT = 2 * 60 * 1000;
+  // --- CRITICAL FIX FOR RENDER 504 TIMEOUT ---
+  // We use Server-Sent Events (SSE) to keep the connection alive
+  // Render kills any HTTP request that is silent for 100 seconds.
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+  res.write(`data: ${JSON.stringify({ status: 'started' })}\n\n`);
+
+  // Kill the process after 5 minutes (increased from 2 minutes) since SSE prevents 504s
+  const ANALYSIS_TIMEOUT = 5 * 60 * 1000;
   const timeout = setTimeout(() => {
     console.error(`[AI Analysis] Timeout after ${ANALYSIS_TIMEOUT / 1000}s, killing process`);
     pythonProcess.kill('SIGKILL');
-    if (!res.headersSent) {
-      res.status(504).json({ error: 'Analysis timed out. Please try with a shorter video (under 10 seconds recommended for free tier).' });
-    }
+    res.write(`data: ${JSON.stringify({ error: 'Analysis timed out. Please try with a shorter video.' })}\n\n`);
+    res.end();
   }, ANALYSIS_TIMEOUT);
+
+  // Send a heartbeat every 15 seconds to keep the connection active
+  const heartbeatInterval = setInterval(() => {
+    res.write(`data: ${JSON.stringify({ status: 'processing', timestamp: Date.now() })}\n\n`);
+  }, 15000);
 
   pythonProcess.on('error', (err) => {
     console.error(`[AI Error] Spawn error:`, err);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'AI processing engine is not available or failed to start.' });
-    }
+    clearInterval(heartbeatInterval);
+    res.write(`data: ${JSON.stringify({ error: 'AI processing engine is not available or failed to start.' })}\n\n`);
+    res.end();
   });
 
   const markers = [];
@@ -244,6 +258,7 @@ exports.analyzeVideo = (req, res) => {
   });
 
   pythonProcess.on('close', async (code) => {
+    clearInterval(heartbeatInterval);
     clearTimeout(timeout);
     if (activeProcesses.get(userId) === pythonProcess) {
       activeProcesses.delete(userId);
@@ -252,12 +267,11 @@ exports.analyzeVideo = (req, res) => {
     
     if (code !== 0 && code !== null) {
       console.error(`[AI Analysis] Failed with stderr: ${stderrBuffer}`);
-      if (!res.headersSent) {
-          return res.status(500).json({ 
-            error: 'AI processing engine failed to complete the analysis.',
-            details: stderrBuffer 
-          });
-      }
+      res.write(`data: ${JSON.stringify({ 
+        error: 'AI processing engine failed to complete the analysis.',
+        details: stderrBuffer 
+      })}\n\n`);
+      res.end();
       return;
     }
 
@@ -280,20 +294,21 @@ exports.analyzeVideo = (req, res) => {
 
       try {
         const savedAnalysis = await Analysis.create(analysisData);
-        res.json({
+        res.write(`data: ${JSON.stringify({
           success: true,
           markers: markers,
           annotatedVideoUrl: `/api/videos/stream/${finalVideoName}`,
           analysisId: savedAnalysis._id
-        });
+        })}\n\n`);
       } catch (saveError) {
         console.error('Failed to save analysis results:', saveError);
-        res.json({
+        res.write(`data: ${JSON.stringify({
           success: true,
           markers: markers,
           annotatedVideoUrl: `/api/videos/stream/${finalVideoName}`
-        });
+        })}\n\n`);
       }
+      res.end();
     };
 
     // Try to re-encode with ffmpeg for browser compatibility
