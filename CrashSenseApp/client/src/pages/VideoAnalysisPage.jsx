@@ -167,6 +167,11 @@ export default function VideoAnalysisPage() {
                   throw new Error(data.error);
                 }
                 
+                if (data.status === 're-encoding') {
+                   // Optional: set a specific 're-encoding' state if desired
+                   console.log("AI finished, now re-encoding video...");
+                }
+                
                 if (data.success) {
                   const realMarkers = data.markers || [];
                   const annotatedUrl = data.annotatedVideoUrl;

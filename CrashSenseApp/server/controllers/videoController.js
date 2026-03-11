@@ -195,7 +195,8 @@ exports.analyzeVideo = (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive'
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
   });
   res.write(`data: ${JSON.stringify({ status: 'started' })}\n\n`);
 
@@ -258,7 +259,7 @@ exports.analyzeVideo = (req, res) => {
   });
 
   pythonProcess.on('close', async (code) => {
-    clearInterval(heartbeatInterval);
+    // We keep heartbeatInterval running during the next ffmpeg transcode block
     clearTimeout(timeout);
     if (activeProcesses.get(userId) === pythonProcess) {
       activeProcesses.delete(userId);
@@ -266,6 +267,7 @@ exports.analyzeVideo = (req, res) => {
     console.log(`[AI Analysis] Finished with code ${code}`);
     
     if (code !== 0 && code !== null) {
+      clearInterval(heartbeatInterval);
       console.error(`[AI Analysis] Failed with stderr: ${stderrBuffer}`);
       res.write(`data: ${JSON.stringify({ 
         error: 'AI processing engine failed to complete the analysis.',
@@ -281,6 +283,7 @@ exports.analyzeVideo = (req, res) => {
     const browserReadyPath = path.join(UPLOADS_DIR, browserReadyName);
 
     const sendResponse = async () => {
+      clearInterval(heartbeatInterval);
       const analysisData = {
         userId: req.user._id,
         fileName: safeName,
@@ -313,8 +316,10 @@ exports.analyzeVideo = (req, res) => {
 
     // Try to re-encode with ffmpeg for browser compatibility
     if (fs.existsSync(outFilePath)) {
+      res.write(`data: ${JSON.stringify({ status: 're-encoding' })}\n\n`);
       let responseSentFlag = false;
-      const ffmpegProcess = spawn('ffmpeg', [
+      const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+      const ffmpegProcess = spawn(ffmpegPath, [
         '-y', '-i', outFilePath,
         '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
         '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
