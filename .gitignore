@@ -65,6 +65,7 @@ Thumbs.db
 Engine/videos/
 Engine/Videos/
 Engine/Features/
-Engine/yolov8n.pt
+/Engine/yolov8n.pt
+!Engine/codes/yolov8n.pt
 CrashSenseApp/server/uploads/*
 !CrashSenseApp/server/uploads/.gitkeep

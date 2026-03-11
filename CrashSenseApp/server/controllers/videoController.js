@@ -194,11 +194,14 @@ exports.analyzeVideo = (req, res) => {
   
   activeProcesses.set(userId, pythonProcess);
 
-  // Kill the process after 5 minutes to prevent Render from killing the whole server
-  const ANALYSIS_TIMEOUT = 5 * 60 * 1000;
+  // Kill the process after 2 minutes to prevent Render OOM kills
+  const ANALYSIS_TIMEOUT = 2 * 60 * 1000;
   const timeout = setTimeout(() => {
     console.error(`[AI Analysis] Timeout after ${ANALYSIS_TIMEOUT / 1000}s, killing process`);
     pythonProcess.kill('SIGKILL');
+    if (!res.headersSent) {
+      res.status(504).json({ error: 'Analysis timed out. Please try with a shorter video (under 10 seconds recommended for free tier).' });
+    }
   }, ANALYSIS_TIMEOUT);
 
   pythonProcess.on('error', (err) => {

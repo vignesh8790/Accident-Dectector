@@ -130,7 +130,9 @@ export default function VideoAnalysisPage() {
       }
 
       const filename = uploadRes.data.filename;
-      const analyzeRes = await api.post('/videos/analyze', { filename });
+      const analyzeRes = await api.post('/videos/analyze', { filename }, {
+        timeout: 180000 // 3 minute timeout for AI analysis (Render Free Tier is slow)
+      });
       
       const realMarkers = analyzeRes.data.markers || [];
       const annotatedUrl = analyzeRes.data.annotatedVideoUrl;
