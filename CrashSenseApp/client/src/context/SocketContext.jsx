@@ -13,20 +13,26 @@ export function SocketProvider({ children }) {
   const alertsRef = useRef([]);
 
   useEffect(() => {
-    // Connect to the backend Node.js Server
+    // Resolve backend URL — must match api.js logic exactly
     let backendUrl = import.meta.env.VITE_API_URL;
     if (!backendUrl) {
-       backendUrl = window.location.origin;
+      // In production on Render: frontend is crash-sense-web, backend is crash-sense-api
+      if (typeof window !== 'undefined' && window.location.hostname.includes('crash-sense-web')) {
+        backendUrl = 'https://crash-sense-api.onrender.com';
+      } else {
+        backendUrl = window.location.origin; // Local dev
+      }
     }
     
-    // Create socket instance without /api path
+    // Create socket instance — connect to the base server, not /api
     const socketUrl = backendUrl.replace('/api', '');
+    console.log('[Socket] Connecting to:', socketUrl);
     const s = io(socketUrl, {
-       transports: ['websocket', 'polling'], // Fallback to polling if websocket fails initially
-       reconnectionAttempts: Infinity, // Keep trying (crucial for Render free tier sleep)
+       transports: ['websocket', 'polling'],
+       reconnectionAttempts: Infinity,
        reconnectionDelay: 1000,
        reconnectionDelayMax: 5000,
-       timeout: 20000, // 20 seconds timeout per attempt
+       timeout: 20000,
     });
 
     s.on('connect', () => {
