@@ -316,6 +316,8 @@ export default function VideoAnalysisPage() {
                 ref={videoRef} 
                 src={videoUrl} 
                 controls 
+                muted
+                playsInline
                 preload="metadata"
                 className="w-full rounded-xl aspect-video bg-black" 
               />

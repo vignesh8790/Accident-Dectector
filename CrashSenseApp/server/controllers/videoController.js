@@ -199,12 +199,12 @@ exports.analyzeVideo = (req, res) => {
   });
   res.write(`data: ${JSON.stringify({ status: 'started' })}\n\n`);
 
-  // Kill the process after 5 minutes (increased from 2 minutes) since SSE prevents 504s
-  const ANALYSIS_TIMEOUT = 5 * 60 * 1000;
+  // Kill the process after 10 minutes since SSE prevents 504s
+  const ANALYSIS_TIMEOUT = 10 * 60 * 1000;
   const timeout = setTimeout(() => {
     console.error(`[AI Analysis] Timeout after ${ANALYSIS_TIMEOUT / 1000}s, killing process`);
     pythonProcess.kill('SIGKILL');
-    res.write(`data: ${JSON.stringify({ error: 'Analysis timed out. Please try with a shorter video.' })}\n\n`);
+    res.write(`data: ${JSON.stringify({ error: 'Analysis timed out. Even with heartbeats, 10 minutes have passed. Try a very short video (< 5s).' })}\n\n`);
     res.end();
   }, ANALYSIS_TIMEOUT);
 
