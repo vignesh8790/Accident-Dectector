@@ -126,13 +126,13 @@ export default function DashboardPage() {
               {user?.role === 'Admin' ? 'Global Incident Trends' : 'Your Detection Activity'}
             </h2>
           </div>
-          <div className="h-64">
+          <div className="h-64 w-full">
             {trendData.length > 0 ? (
-              <ResponsiveContainer>
-                <AreaChart data={trendData}>
+              <ResponsiveContainer width="100%" height="100%">
+                 <AreaChart data={trendData}>
                   <defs><linearGradient id="grad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3}/><stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/></linearGradient></defs>
                   <XAxis dataKey="date" stroke="#64748b" fontSize={12} />
-                  <YAxis stroke="#64748b" fontSize={12} />
+                  <YAxis stroke="#64748b" fontSize={12} width={30} />
                   <Tooltip contentStyle={{ background: '#0B0F14', border: '1px solid #1e293b', borderRadius: 12, fontSize: 12 }} />
                   <Area type="monotone" dataKey="incidents" stroke="#3B82F6" fill="url(#grad)" strokeWidth={2} />
                 </AreaChart>

@@ -14,10 +14,25 @@ export function SocketProvider({ children }) {
 
   useEffect(() => {
     // Connect to the backend Node.js Server
-    const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-    const s = io(backendUrl.replace('/api', ''));
+    let backendUrl = import.meta.env.VITE_API_URL;
+    if (!backendUrl) {
+       backendUrl = window.location.origin;
+    }
+    
+    // Create socket instance without /api path
+    const socketUrl = backendUrl.replace('/api', '');
+    const s = io(socketUrl, {
+       transports: ['websocket', 'polling'], // Fallback to polling if websocket fails initially
+       reconnectionAttempts: Infinity, // Keep trying (crucial for Render free tier sleep)
+       reconnectionDelay: 1000,
+       reconnectionDelayMax: 5000,
+       timeout: 20000, // 20 seconds timeout per attempt
+    });
 
-    s.on('connect', () => setConnected(true));
+    s.on('connect', () => {
+      console.log('Socket connected successfully');
+      setConnected(true);
+    });
     s.on('disconnect', () => setConnected(false));
 
     s.on('detection', (data) => {

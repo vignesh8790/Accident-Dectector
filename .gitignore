@@ -68,4 +68,3 @@ Engine/Features/
 Engine/yolov8n.pt
 CrashSenseApp/server/uploads/*
 !CrashSenseApp/server/uploads/.gitkeep
-sample-videos/

@@ -1,16 +1,14 @@
 import axios from 'axios';
 
-export const backendUrl = import.meta.env.VITE_API_URL || '';
+export const backendUrl = import.meta.env.VITE_API_URL || window.location.origin;
 const api = axios.create({ baseURL: backendUrl ? `${backendUrl}/api` : '/api' });
 
 export const getMediaUrl = (path) => {
   if (!path) return '';
   if (path.startsWith('http')) return path;
-  // If no backendUrl set (local dev), and path starts with /, return as is
-  if (!backendUrl && path.startsWith('/')) return path;
-  // Prevent double slash if backendUrl is present but ends without slash and path starts with slash
+  
   const cleanPath = path.startsWith('/') ? path.substring(1) : path;
-  return backendUrl ? `${backendUrl}/${cleanPath}` : `/${cleanPath}`;
+  return `${backendUrl}/${cleanPath}`;
 };
 
 api.interceptors.request.use((config) => {
