@@ -1,0 +1,38 @@
+services:
+  # The Node.js + Python combined Web Service
+  - type: web
+    name: crashsense-api
+    env: docker
+    region: ohio
+    plan: free
+    dockerCommand: "npm start"
+    envVars:
+      - key: PORT
+        value: 5000
+      - key: NODE_ENV
+        value: production
+      - key: AI_SERVICE_URL
+        value: "" # We do not use the AI service anymore, we spawn python directly
+      - key: DB_URI
+        sync: false # Requires manual entry in Render dashboard
+      - key: JWT_SECRET
+        sync: false # Requires manual entry in Render dashboard
+
+  # The AI simulator service is redundant and no longer needed because
+  # the Express backend directly runs the `Engine/codes/test_inference_lite.py`
+  # python file inside the same Docker container.
+
+  # The Static Site for the React Frontend
+  - type: web
+    name: crashsense-web
+    env: static
+    region: ohio
+    plan: free
+    buildCommand: "cd CrashSenseApp/client && npm install && npm run build"
+    publishPath: "CrashSenseApp/client/dist"
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: crashsense-api
+          envVarKey: RENDER_EXTERNAL_URL

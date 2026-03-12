@@ -1,10 +1,14 @@
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const multer = require('multer');
 const Analysis = require('../models/Analysis');
 
+// --- Render Compatible File Paths ---
+// For Render, we MUST use the OS temporary directory as the local file system is ephemeral
 const SAMPLE_VIDEOS_DIR = path.join(__dirname, '..', '..', 'sample-videos');
-const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+// Create a dedicated temp folder for CrashSense
+const UPLOADS_DIR = path.join(os.tmpdir(), 'crashsense_uploads');
 
 const activeProcesses = new Map();
 
@@ -24,10 +28,22 @@ const upload = multer({
     if (allowed.includes(ext)) cb(null, true);
     else cb(new Error('Only video files (mp4, avi, mov, mkv) are allowed.'));
   },
-  limits: { fileSize: 500 * 1024 * 1024 } // 500MB
+  limits: { fileSize: 100 * 1024 * 1024 } // REDUCED TO 100MB FOR RENDER FREE TIER MEMORY SAFETY
 });
 
 exports.uploadMiddleware = upload.single('video');
+
+// Helper to safely delete file
+const safeDelete = (filepath) => {
+  try {
+    if (fs.existsSync(filepath)) {
+      fs.unlinkSync(filepath);
+      console.log(`[Cleanup] Deleted ephemeral file: ${filepath}`);
+    }
+  } catch (e) {
+    console.error(`[Cleanup] Failed to delete: ${filepath}`, e.message);
+  }
+};
 
 exports.streamVideo = (req, res) => {
   try {
@@ -104,24 +120,29 @@ exports.uploadVideo = async (req, res) => {
     ffmpeg(inputPath)
       .outputOptions([
         '-c:v libx264',
-        '-preset veryfast',
+        '-preset ultrafast', // Optimize for speed and low memory on Render
         '-crf 28',
         '-c:a aac'
       ])
       .save(outputPath)
       .on('end', () => {
         console.log(`[Transcode] FFmpeg finished successfully for ${safeName}`);
+        
+        // Render Free Tier trick: Cleanup the original massive file if we transcoded it successfully
+        if (inputPath !== outputPath) {
+            safeDelete(inputPath);
+        }
+
         res.json({
           message: 'Video uploaded and prepared successfully.',
-          filename: req.file.filename,
-          previewFilename: previewFilename,
+          filename: previewFilename, // Use the preview file for analysis to guarantee format matching
           path: `/api/videos/stream/${previewFilename}`
         });
       })
       .on('error', (err) => {
         console.error(`[Transcode] FFmpeg error for ${safeName}:`, err);
         if (!res.headersSent) {
-          // Fallback to original if transcoding fails (even if it might not play inline on all devices)
+          // Fallback to original if transcoding fails
           res.json({
             message: 'Video uploaded (transcoding native failed).',
             filename: req.file.filename,
@@ -157,26 +178,28 @@ exports.analyzeVideo = (req, res) => {
   const filePath = path.join(UPLOADS_DIR, safeName);
 
   if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: 'Video file not found.' });
+    return res.status(404).json({ error: 'Video file not found or expired from temporary storage. Please re-upload.' });
   }
 
   // Path to the main Engine inference script
-  const pythonScript = path.join(__dirname, '..', '..', '..', 'Engine', 'codes', 'test_inference_lite.py');
+  // In Docker, /app/Engine/codes/test_inference_lite.py
+  const pythonScript = path.resolve(__dirname, '..', '..', '..', 'Engine', 'codes', 'test_inference_lite.py');
   
   // We need to run it in the Engine/codes directory so it finds models/yolo weights correctly
   const cwd = path.dirname(pythonScript);
   
   const { spawn } = require('child_process');
   
-  // We're using python3 for Render/Linux, or just python for local/Windows
-  // On Windows, we try to use the project's .venv python if it exists
-  let pythonPath = process.platform === 'win32' ? 'python' : 'python3'; 
+  // RENDER DOCKER FIX: Use global `python3` since we pip installed into system python in Docker
+  let pythonPath = 'python3'; 
   
   if (process.platform === 'win32') {
-    const venvPath = path.join(__dirname, '..', '..', '..', '.venv', 'Scripts', 'python.exe');
+    const venvPath = path.resolve(__dirname, '..', '..', '..', '.venv', 'Scripts', 'python.exe');
     if (fs.existsSync(venvPath)) {
       pythonPath = venvPath;
-      console.log(`[AI Analysis] Using Virtual Environment Python: ${pythonPath}`);
+      console.log(`[AI Analysis] Using Local Windows Virtual Environment Python: ${pythonPath}`);
+    } else {
+        pythonPath = 'python';
     }
   }
   
@@ -184,8 +207,20 @@ exports.analyzeVideo = (req, res) => {
   const outFileName = `annotated-${safeName}`;
   const outFilePath = path.join(UPLOADS_DIR, outFileName);
 
-  console.log(`[AI Analysis] Spawning ${pythonPath} ${pythonScript} --video ${filePath} --output ${outFilePath}`);
-  const pythonProcess = spawn(pythonPath, [pythonScript, '--video', filePath, '--output', outFilePath], { cwd });
+  console.log(`[AI Analysis] Spawning ${pythonPath} ${pythonScript}`);
+  console.log(`[AI Path Info] CWD: ${cwd}`);
+  console.log(`[AI Path Info] Video: ${filePath}`);
+  console.log(`[AI Path Info] Output: ${outFilePath}`);
+
+  // Set memory limit environment variables explicitly for the child process so ONNX doesn't crash Render
+  const aiEnv = {
+      ...process.env,
+      'OMP_NUM_THREADS': '1',
+      'MKL_NUM_THREADS': '1',
+      'OPENBLAS_NUM_THREADS': '1'
+  };
+
+  const pythonProcess = spawn(pythonPath, [pythonScript, '--video', filePath, '--output', outFilePath], { cwd, env: aiEnv });
   
   activeProcesses.set(userId, pythonProcess);
 
@@ -200,12 +235,12 @@ exports.analyzeVideo = (req, res) => {
   });
   res.write(`data: ${JSON.stringify({ status: 'started' })}\n\n`);
 
-  // Kill the process after 10 minutes since SSE prevents 504s
-  const ANALYSIS_TIMEOUT = 10 * 60 * 1000;
+  // Kill the process after 6 minutes (Render free tier timeout ceiling protection)
+  const ANALYSIS_TIMEOUT = 6 * 60 * 1000;
   const timeout = setTimeout(() => {
     console.error(`[AI Analysis] Timeout after ${ANALYSIS_TIMEOUT / 1000}s, killing process`);
     pythonProcess.kill('SIGKILL');
-    res.write(`data: ${JSON.stringify({ error: 'Analysis timed out. Even with heartbeats, 10 minutes have passed. Try a very short video (< 5s).' })}\n\n`);
+    res.write(`data: ${JSON.stringify({ error: 'Analysis timed out due to Free Tier limits. Try a shorter video (< 10s).' })}\n\n`);
     res.end();
   }, ANALYSIS_TIMEOUT);
 
@@ -215,7 +250,7 @@ exports.analyzeVideo = (req, res) => {
   }, 15000);
 
   pythonProcess.on('error', (err) => {
-    console.error(`[AI Error] Spawn error:`, err);
+    console.error(`[AI Error] Spawn error (Is Python installed?):`, err);
     clearInterval(heartbeatInterval);
     res.write(`data: ${JSON.stringify({ error: 'AI processing engine is not available or failed to start.' })}\n\n`);
     res.end();
@@ -255,7 +290,12 @@ exports.analyzeVideo = (req, res) => {
   pythonProcess.stderr.on('data', (data) => {
     const errorMsg = data.toString().trim();
     stderrBuffer += errorMsg;
-    console.error(`[AI Error] ${errorMsg}`);
+    // Log stderr for debugging but don't crash stream yet
+    if (errorMsg.includes('Error') || errorMsg.includes('Exception') || errorMsg.includes('Killed')) {
+         console.error(`[AI Python Error] ${errorMsg}`);
+    } else {
+         console.log(`[AI Python Log] ${errorMsg}`); // Some libs log info to stderr
+    }
   });
 
   pythonProcess.on('close', async (code) => {
@@ -264,14 +304,25 @@ exports.analyzeVideo = (req, res) => {
     if (activeProcesses.get(userId) === pythonProcess) {
       activeProcesses.delete(userId);
     }
-    console.log(`[AI Analysis] Finished with code ${code}`);
+    console.log(`[AI Analysis] Finished with exit code ${code}`);
     
+    // Check if process was killed due to memory limit (Exit code 137 typically)
+    if (code === 137) {
+        clearInterval(heartbeatInterval);
+        console.error(`[AI Analysis] Process killed by OS (Likely OUT OF MEMORY on Render 512MB RAM limit).`);
+        res.write(`data: ${JSON.stringify({ 
+          error: 'Out of Memory Error on Render Server. The Free Tier 512MB limit was exceeded. Try a lower resolution or shorter video.'
+        })}\n\n`);
+        res.end();
+        return;
+    }
+
     if (code !== 0 && code !== null) {
       clearInterval(heartbeatInterval);
-      console.error(`[AI Analysis] Failed with stderr: ${stderrBuffer}`);
+      console.error(`[AI Analysis] Failed with code ${code}. Stderr: ${stderrBuffer.substring(0, 500)}`);
       res.write(`data: ${JSON.stringify({ 
-        error: 'AI processing engine failed to complete the analysis.',
-        details: stderrBuffer 
+        error: 'AI processing engine failed to complete the analysis successfully.',
+        details: stderrBuffer.substring(0, 200) + '...' 
       })}\n\n`);
       res.end();
       return;
@@ -282,16 +333,16 @@ exports.analyzeVideo = (req, res) => {
     const browserReadyName = `web-${outFileName}`;
     const browserReadyPath = path.join(UPLOADS_DIR, browserReadyName);
 
-    const sendResponse = async () => {
+    const sendResponse = async (finalNameTarget) => {
       clearInterval(heartbeatInterval);
       const analysisData = {
         userId: req.user._id,
         fileName: safeName,
-        fileSize: fs.statSync(filePath).size,
+        fileSize: fs.existsSync(filePath) ? fs.statSync(filePath).size : 0,
         duration: 0,
         markers: markers,
-        originalVideoPath: `/api/videos/stream/${safeName}`,
-        annotatedVideoUrl: `/api/videos/stream/${finalVideoName}`,
+        originalVideoPath: `/api/videos/stream/${safeName}`, // Might 404 later depending on cleanup config but saves state
+        annotatedVideoUrl: `/api/videos/stream/${finalNameTarget}`,
         processedAt: new Date()
       };
 
@@ -300,7 +351,7 @@ exports.analyzeVideo = (req, res) => {
         res.write(`data: ${JSON.stringify({
           success: true,
           markers: markers,
-          annotatedVideoUrl: `/api/videos/stream/${finalVideoName}`,
+          annotatedVideoUrl: `/api/videos/stream/${finalNameTarget}`,
           analysisId: savedAnalysis._id
         })}\n\n`);
       } catch (saveError) {
@@ -308,10 +359,19 @@ exports.analyzeVideo = (req, res) => {
         res.write(`data: ${JSON.stringify({
           success: true,
           markers: markers,
-          annotatedVideoUrl: `/api/videos/stream/${finalVideoName}`
+          annotatedVideoUrl: `/api/videos/stream/${finalNameTarget}`
         })}\n\n`);
       }
       res.end();
+      
+      // Cleanup ephemeral files slightly later to allow frontend to start streaming the result
+      // On Render free tier we MUST aggressively delete old files. 
+      // Original is cleaned, we keep the annotated video so they can watch it just once.
+      // Since disk space is ephemeral anyway, it wiping is expected.
+      setTimeout(() => {
+          safeDelete(filePath);
+          if (finalNameTarget !== outFileName) safeDelete(outFilePath);
+      }, 30 * 60 * 1000); // Wait 30 minutes before deleting temp result
     };
 
     // Try to re-encode with ffmpeg for browser compatibility
@@ -331,7 +391,7 @@ exports.analyzeVideo = (req, res) => {
           responseSentFlag = true;
           console.log(`[ffmpeg] Not available (${err.message}), using OpenCV output as fallback`);
           finalVideoName = outFileName;
-          sendResponse();
+          sendResponse(finalVideoName);
         }
       });
 
@@ -340,19 +400,21 @@ exports.analyzeVideo = (req, res) => {
           responseSentFlag = true;
           if (ffmpegCode === 0 && fs.existsSync(browserReadyPath)) {
             console.log(`[ffmpeg] Successfully re-encoded to ${browserReadyName}`);
+            // Delete the unweb-optimized opencv output immediately to save space
+            safeDelete(outFilePath);
             finalVideoName = browserReadyName;
           } else {
             console.log(`[ffmpeg] Failed (code ${ffmpegCode}), using OpenCV output as fallback`);
             finalVideoName = outFileName;
           }
-          sendResponse();
+          sendResponse(finalVideoName);
         }
       });
     } else {
       // Annotated file doesn't exist, use original upload
-      console.log(`[AI Analysis] No annotated file found, using original upload`);
+      console.log(`[AI Analysis] No annotated file found at ${outFilePath}, using original upload`);
       finalVideoName = safeName;
-      sendResponse();
+      sendResponse(finalVideoName);
     }
   });
 };
@@ -370,6 +432,11 @@ exports.deleteAnalysis = async (req, res) => {
   try {
     const analysis = await Analysis.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
     if (!analysis) return res.status(404).json({ error: 'Analysis not found.' });
+    
+    // Also try removing matching annotated video if it exists in tmp
+    const possibleName = path.basename(analysis.annotatedVideoUrl || '');
+    if (possibleName) safeDelete(path.join(UPLOADS_DIR, possibleName));
+
     res.json({ message: 'Analysis history entry deleted.' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete analysis history.' });

@@ -40,9 +40,11 @@ COPY . /app/
 # Navigate to the Node.js server directory for the final startup command
 WORKDIR /app/CrashSenseApp/server
 
-# Ensure the uploads and sample-videos directories exist with correct permissions
-RUN mkdir -p uploads && chmod 777 uploads
+# Ensure the sample-videos directory exists with correct permissions
 RUN mkdir -p ../sample-videos && chmod 777 ../sample-videos
+
+# Set production environment variables
+ENV NODE_ENV=production
 
 # Expose the API port
 EXPOSE 5000

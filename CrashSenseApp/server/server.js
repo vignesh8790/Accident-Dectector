@@ -38,6 +38,9 @@ app.use('/api/incidents', require('./routes/incidents'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/videos', require('./routes/videos'));
 
+// Make sure express trusts proxy if hosted on Render behind load balancers
+app.set('trust proxy', 1);
+
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 

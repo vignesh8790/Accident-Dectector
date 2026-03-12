@@ -26,10 +26,10 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 # ── Robust Accuracy Configuration ──
-MAX_FRAME_WIDTH = 640    # Standard resolution for LSTM trained models
-YOLO_IMGSZ = 320         # Balanced YOLO speed
-DEEPSORT_BUDGET = 30     # Sufficient for tracking
-LIVE_PREVIEW_EVERY = 25  # Frequency of base64 preview frames
+MAX_FRAME_WIDTH = 480    # Reduced from 640 to 480 for 512MB RAM constraint
+YOLO_IMGSZ = 256         # Reduced from 320 for speed and lower RAM
+DEEPSORT_BUDGET = 15     # Reduced from 30 to save tracking memory
+LIVE_PREVIEW_EVERY = 30  # Less frequent base64 emission to save node.js memory
 
 def run_inference(video_source, lstm_onnx_path=None, yolo_weights=None, output=None):
     if lstm_onnx_path is None:
@@ -51,11 +51,14 @@ def run_inference(video_source, lstm_onnx_path=None, yolo_weights=None, output=N
     # Initialize Tracker
     tracker = DeepSort(max_age=30, nn_budget=DEEPSORT_BUDGET)
     
-    # Initialize ONNX with single-thread CPU optimization
+    # Initialize ONNX with single-thread CPU optimization (CRITICAL FOR 512MB)
     sess_options = ort.SessionOptions()
     sess_options.intra_op_num_threads = 1
     sess_options.inter_op_num_threads = 1
+    sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    # Render free tier optimization - prevent memory arena growing infinitely
+    sess_options.enable_cpu_mem_arena = False 
     
     ort_session = ort.InferenceSession(lstm_onnx_path, sess_options, providers=['CPUExecutionProvider'])
     input_name = ort_session.get_inputs()[0].name
@@ -173,7 +176,8 @@ def run_inference(video_source, lstm_onnx_path=None, yolo_weights=None, output=N
         if out_writer:
             out_writer.write(vis_frame)
         
-        if frame_count % 100 == 0:
+        # AGGRESSIVE GARBAGE COLLECTION for 512MB limit
+        if frame_count % 30 == 0:
             gc.collect()
 
     cap.release()
